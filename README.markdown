@@ -6,6 +6,12 @@ I could not get cross-compilation on the M2 to work yet. For now, compile and ru
 $ cargo build --release && rsync --progress -r -e ssh src/ kiosk:workspace/mqtt-blink1/src && ssh kiosk "cd workspace/mqtt-blink1 && cargo run"
 ```
 
+# Iterate
+
+```command
+$ cargo watch -- zsh -c 'rsync --progress --exclude-from=.rsyncignore -r -e ssh ./ kiosk:workspace/mqtt-blink1/ && ssh kiosk "cd workspace/mqtt-blink1; killall mqtt-blink1; cargo run"'
+```
+
 # TODO
 
 - implement

@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 blinkrs = "2.0.1"
+signal-hook = "0.3.17"
