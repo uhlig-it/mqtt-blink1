@@ -1,12 +1,54 @@
+use clap::Parser;
+use mqtt::QOS_0;
+use paho_mqtt as mqtt;
 use std::boxed::Box;
-use std::error::Error;
+use std::io::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::{thread, time};
+use std::time;
+use std::{env, process, thread, time::Duration};
+use url::Url;
 
 use blinkrs::{Blinkers, Color, Message};
 
-fn main() -> Result<(), Box<dyn Error>> {
+// // How long to wait for responses before giving up
+// const MQTT_RECEIVE_TIMEOUT: Duration = Duration::from_millis(1000);
+
+// Keep alive interval for the client session
+const MQTT_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(20);
+
+// Duration that needs to elapse before an attempt to reconnect will be made
+const MQTT_RECONNECT_INTERVAL: Duration = Duration::from_millis(1000);
+
+#[derive(Parser, Debug)]
+#[clap(
+    author,
+    version,
+    about,
+    help_template = "\
+{before-help}{name} v.{version}
+
+{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}{after-help}
+
+Author: {author-with-newline}
+"
+)]
+pub struct Args {
+    /// Topic where the device expects commands on
+    #[arg(short('t'), long, default_value = "werkstatt/blink1/cmnd")]
+    command_topic: String,
+
+    /// Topic where the device publishes status changes on
+    #[arg(short('s'), long, default_value = "werkstatt/blink1/status")]
+    status_topic: String,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let options: Args = Args::parse();
+
     let blink1: Blinkers = match Blinkers::new() {
         Ok(b) => b,
         Err(_e) => {
@@ -14,6 +56,104 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
     };
+
+    let urlstr = env::var("MQTT_URL").unwrap_or_else(|e| {
+        eprintln!("Error fetching the MQTT_URL: {:?}", e);
+        process::exit(1);
+    });
+
+    let url = Url::parse(&urlstr).unwrap_or_else(|e| {
+        if urlstr.is_empty() {
+            eprintln!("Error: $MQTT_URL not set");
+        } else {
+            eprintln!("Error: unable to parse the $MQTT_URL: {:?}", e);
+        }
+        process::exit(1);
+    });
+
+    let hostname = url.host_str().expect("Error extracting the host");
+    let progname = progname().expect("Error determining the program name");
+
+    let create_options = mqtt::CreateOptionsBuilder::new()
+        .server_uri(hostname)
+        .client_id(progname)
+        .finalize();
+
+    let mut conn_opts = mqtt::ConnectOptionsBuilder::new();
+    conn_opts.keep_alive_interval(MQTT_KEEP_ALIVE_INTERVAL);
+
+    match url.username().len() {
+        0 => {}
+        _ => {
+            eprintln!("Setting username to {}", url.username());
+            conn_opts.user_name(url.username());
+        }
+    }
+
+    match url.password() {
+        Some(password) => {
+            eprintln!("Setting password (masked)");
+            conn_opts.password(password);
+        }
+        None => {}
+    }
+
+    let client = mqtt::Client::new(create_options).unwrap_or_else(|e| {
+        eprintln!("Error creating the client: {:?}", e);
+        process::exit(1);
+    });
+
+    let rx = client.start_consuming();
+
+    match client.connect(conn_opts.finalize()) {
+        Ok(rsp) => {
+            if let Some(conn_rsp) = rsp.connect_response() {
+                eprintln!(
+                    "Connected to: '{}' with MQTT version {}",
+                    conn_rsp.server_uri, conn_rsp.mqtt_version
+                );
+
+                if conn_rsp.session_present {
+                    eprintln!("Client session already present on broker.");
+                } else {
+                    match client.subscribe(&options.command_topic, QOS_0) {
+                        Ok(_) => eprintln!("Subscribed"),
+                        Err(e) => {
+                            eprintln!("Error subscribing: {:?}", e);
+                            client.disconnect(None).unwrap();
+                            process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error connecting to the broker: {:?}", e);
+            process::exit(1);
+        }
+    }
+
+    println!(
+        "\nWaiting for messages on topics {:?}...",
+        options.command_topic
+    );
+    for msg in rx.iter() {
+        if let Some(msg) = msg {
+            println!("{}", msg);
+        } else if client.is_connected() || !try_reconnect(&client, MQTT_RECONNECT_INTERVAL) {
+            break;
+        }
+    }
+
+    if client.is_connected() {
+        println!("\nDisconnecting...");
+        client.disconnect(None).unwrap();
+    }
+
+    if client.is_connected() {
+        client.unsubscribe(&options.command_topic).unwrap();
+        client.disconnect(None).unwrap();
+    }
 
     let short_interval = time::Duration::from_millis(80);
     let long_interval = time::Duration::from_millis(500);
@@ -42,6 +182,43 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Cleaning up...");
     blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
+    client.stop_consuming();
 
     Ok(())
+}
+
+fn try_reconnect(cli: &mqtt::Client, reconnect_interval: Duration) -> bool {
+    eprintln!("Connection lost. Waiting to retry connection");
+    for _ in 0..12 {
+        thread::sleep(reconnect_interval);
+        if cli.reconnect().is_ok() {
+            eprintln!("Successfully reconnected");
+            return true;
+        }
+    }
+    eprintln!("Unable to reconnect after several attempts.");
+    false
+}
+
+#[derive(Debug)]
+enum ProgError {
+    NoFile,
+    NotUtf8,
+    Io(Error),
+}
+
+impl From<Error> for ProgError {
+    fn from(err: Error) -> ProgError {
+        ProgError::Io(err)
+    }
+}
+
+// https://stackoverflow.com/a/36859137/3212907
+fn progname() -> Result<String, ProgError> {
+    Ok(env::current_exe()?
+        .file_name()
+        .ok_or(ProgError::NoFile)?
+        .to_str()
+        .ok_or(ProgError::NotUtf8)?
+        .to_owned())
 }

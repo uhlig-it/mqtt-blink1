@@ -1,8 +1,13 @@
 [package]
 name = "mqtt-blink1"
+description = "Controls a Blink1 device via MQTT"
+authors = ["Steffen Uhlig <steffen@familie-uhlig.net>"]
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 blinkrs = "2.0.1"
+clap = { version = "4.4.16", features = ["derive"] }
+paho-mqtt = "0.12.3"
 signal-hook = "0.3.17"
+url = "2.5.0"
