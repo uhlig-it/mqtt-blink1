@@ -1,13 +1,15 @@
+use blinkrs::{Blinkers, Color, Message};
 use clap::Parser;
 use mqtt::QOS_0;
 use paho_mqtt as mqtt;
+use serde_json::Result as SerdeJsonResult;
 use std::boxed::Box;
 use std::io::Error;
 use std::time;
 use std::{env, process, thread, time::Duration};
 use url::Url;
 
-use blinkrs::{Blinkers, Color, Message};
+pub mod blink1;
 
 // Keep alive interval for the client session
 const MQTT_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(20);
@@ -130,7 +132,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for msg in rx.iter() {
         if let Some(msg) = msg {
-            println!("{}", msg);
+            let payload_str = msg.payload_str();
+
+            let result: SerdeJsonResult<blink1::Command> = serde_json::from_str(&payload_str);
+
+            match result {
+                Ok(cmd) => {
+                    println!("command: {}", serde_json::to_string(&cmd).unwrap())
+                }
+                Err(e) => {
+                    eprintln!("Unable to parse message '{}': {}", payload_str, e);
+                }
+            }
 
             let short_interval = time::Duration::from_millis(80);
             let long_interval = time::Duration::from_millis(500);
