@@ -11,11 +11,11 @@ pub enum Command {
 #[derive(Deserialize, Serialize)]
 pub struct Color {
     #[serde(default)]
-    pub r: u64,
+    pub r: u8,
     #[serde(default)]
-    pub g: u64,
+    pub g: u8,
     #[serde(default)]
-    pub b: u64,
+    pub b: u8,
 }
 
 impl fmt::Display for Color {
@@ -27,7 +27,7 @@ impl fmt::Display for Color {
 #[derive(Deserialize, Serialize)]
 pub struct Blink {
     #[serde(default)]
-    pub frequency: f64,
+    pub interval_ms: u64,
     #[serde(default)]
     pub count: u64,
     pub color: Color,
@@ -35,7 +35,7 @@ pub struct Blink {
 
 impl fmt::Display for Blink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Blink(frequency: {}, count: {}, color: {})", self.frequency, self.count, self.color)
+        write!(f, "Blink(frequency: {}, count: {}, color: {})", self.interval_ms, self.count, self.color)
     }
 }
 
@@ -73,7 +73,7 @@ mod tests {
         match result {
             Ok(cmd) => match cmd {
                 Command::Blink { blink } => {
-                  assert_eq!(blink.frequency, 2.0);
+                  assert_eq!(blink.interval_ms, 200);
                   assert_eq!(blink.count, 0);
                   assert_eq!(blink.color.r, 13);
                   assert_eq!(blink.color.g, 8);

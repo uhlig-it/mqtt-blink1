@@ -87,12 +87,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    match url.password() {
-        Some(password) => {
-            eprintln!("Setting password (masked)");
-            conn_opts.password(password);
-        }
-        None => {}
+    if let Some(password) = url.password() {
+        eprintln!("Setting password (masked)");
+        conn_opts.password(password);
     }
 
     let client = mqtt::Client::new(create_options).unwrap_or_else(|e| {
@@ -130,6 +127,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let neutral = blinkrs::Color::Three(0, 0, 0);
+
     for msg in rx.iter() {
         if let Some(msg) = msg {
             let payload_str = msg.payload_str();
@@ -137,28 +136,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let result: SerdeJsonResult<blink1::Command> = serde_json::from_str(&payload_str);
 
             match result {
-                Ok(cmd) => {
-                    println!("command: {}", serde_json::to_string(&cmd).unwrap())
-                }
+                Ok(cmd) => match cmd {
+                    blink1::Command::Blink { blink } => {
+                        let interval = time::Duration::from_millis(blink.interval_ms);
+                        let col = Color::Three(blink.color.r, blink.color.g, blink.color.b);
+
+                        for _ in 0..blink.count {
+                            blink1.send(Message::Immediate(col, None))?;
+                            thread::sleep(interval);
+                            blink1.send(Message::Immediate(neutral, None))?;
+                            thread::sleep(interval);
+                        }
+                    }
+                    blink1::Command::Color { color } => {
+                        blink1.send(Message::Immediate(
+                            blinkrs::Color::Three(color.r, color.g, color.b),
+                            None,
+                        ))?;
+                    }
+                },
                 Err(e) => {
                     eprintln!("Unable to parse message '{}': {}", payload_str, e);
                 }
             }
-
-            let short_interval = time::Duration::from_millis(80);
-            let long_interval = time::Duration::from_millis(500);
-
-            for _ in 0..4 {
-                blink1.send(Message::Immediate(Color::Three(0, 0, 255), None))?;
-                thread::sleep(short_interval);
-                blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
-                thread::sleep(short_interval);
-                blink1.send(Message::Immediate(Color::Three(255, 0, 0), None))?;
-                thread::sleep(short_interval);
-                blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
-                thread::sleep(short_interval);
-            }
-            thread::sleep(long_interval);
         } else if client.is_connected() || !try_reconnect(&client, MQTT_RECONNECT_INTERVAL) {
             break;
         }
