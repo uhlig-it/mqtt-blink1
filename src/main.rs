@@ -3,16 +3,11 @@ use mqtt::QOS_0;
 use paho_mqtt as mqtt;
 use std::boxed::Box;
 use std::io::Error;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time;
 use std::{env, process, thread, time::Duration};
 use url::Url;
 
 use blinkrs::{Blinkers, Color, Message};
-
-// // How long to wait for responses before giving up
-// const MQTT_RECEIVE_TIMEOUT: Duration = Duration::from_millis(1000);
 
 // Keep alive interval for the client session
 const MQTT_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(20);
@@ -133,13 +128,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!(
-        "\nWaiting for messages on topics {:?}...",
-        options.command_topic
-    );
     for msg in rx.iter() {
         if let Some(msg) = msg {
             println!("{}", msg);
+
+            let short_interval = time::Duration::from_millis(80);
+            let long_interval = time::Duration::from_millis(500);
+
+            for _ in 0..4 {
+                blink1.send(Message::Immediate(Color::Three(0, 0, 255), None))?;
+                thread::sleep(short_interval);
+                blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
+                thread::sleep(short_interval);
+                blink1.send(Message::Immediate(Color::Three(255, 0, 0), None))?;
+                thread::sleep(short_interval);
+                blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
+                thread::sleep(short_interval);
+            }
+            thread::sleep(long_interval);
         } else if client.is_connected() || !try_reconnect(&client, MQTT_RECONNECT_INTERVAL) {
             break;
         }
@@ -153,31 +159,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if client.is_connected() {
         client.unsubscribe(&options.command_topic).unwrap();
         client.disconnect(None).unwrap();
-    }
-
-    let short_interval = time::Duration::from_millis(80);
-    let long_interval = time::Duration::from_millis(500);
-
-    let term = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&term))?;
-    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&term))?;
-
-    while !term.load(Ordering::Relaxed) {
-        for _ in 0..4 {
-            blink1.send(Message::Immediate(Color::Three(0, 0, 255), None))?;
-            thread::sleep(short_interval);
-            blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
-            thread::sleep(short_interval);
-            blink1.send(Message::Immediate(Color::Three(255, 0, 0), None))?;
-            thread::sleep(short_interval);
-            blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
-            thread::sleep(short_interval);
-            blink1.send(Message::Immediate(Color::Three(255, 255, 0), None))?;
-            thread::sleep(short_interval);
-            blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
-            thread::sleep(short_interval);
-        }
-        thread::sleep(long_interval);
     }
 
     println!("Cleaning up...");
