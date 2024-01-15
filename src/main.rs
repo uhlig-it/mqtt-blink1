@@ -1,4 +1,4 @@
-use blinkrs::{Blinkers, Color, Message};
+use blinkrs::{Blinkers, Message};
 use clap::Parser;
 use mqtt::QOS_0;
 use paho_mqtt as mqtt;
@@ -128,6 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let neutral = blinkrs::Color::Three(0, 0, 0);
+    let neutral_c = blink1::Color{r: 0, g: 0, b: 0};
 
     for msg in rx.iter() {
         if let Some(msg) = msg {
@@ -139,12 +140,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(cmd) => match cmd {
                     blink1::Command::Blink { blink } => {
                         let interval = time::Duration::from_millis(blink.interval_ms);
-                        let col = Color::Three(blink.color.r, blink.color.g, blink.color.b);
+                        let col =
+                            blinkrs::Color::Three(blink.color.r, blink.color.g, blink.color.b);
 
                         for _ in 0..blink.count {
                             blink1.send(Message::Immediate(col, None))?;
+                            publish_status(&client, options.status_topic.clone(), &blink.color)?;
                             thread::sleep(interval);
                             blink1.send(Message::Immediate(neutral, None))?;
+                            publish_status(&client, options.status_topic.clone(), &neutral_c)?;
                             thread::sleep(interval);
                         }
                     }
@@ -153,6 +157,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             blinkrs::Color::Three(color.r, color.g, color.b),
                             None,
                         ))?;
+
+                        publish_status(&client, options.status_topic.clone(), &color)?
                     }
                 },
                 Err(e) => {
@@ -175,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("Cleaning up...");
-    blink1.send(Message::Immediate(Color::Three(0, 0, 0), None))?;
+    blink1.send(Message::Immediate(blinkrs::Color::Three(0, 0, 0), None))?;
     client.stop_consuming();
 
     Ok(())
@@ -215,4 +221,22 @@ fn progname() -> Result<String, ProgError> {
         .to_str()
         .ok_or(ProgError::NotUtf8)?
         .to_owned())
+}
+
+fn publish_status(client: &mqtt::Client, t: String, color: &blink1::Color) -> Result<(), String> {
+    let result = serde_json::to_string(&color);
+
+    match result {
+        Ok(m) => {
+            let msg = mqtt::MessageBuilder::new().topic(t).payload(m).finalize();
+
+            let result = client.publish(msg);
+
+            match result {
+                Ok(o) => Ok(o),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
