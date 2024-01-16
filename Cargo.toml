@@ -3,6 +3,7 @@ name = "mqtt-blink1"
 description = "Controls a Blink1 device via MQTT"
 authors = ["Steffen Uhlig <steffen@familie-uhlig.net>"]
 repository = "https://github.com/uhlig-it/mqtt-blink1"
+license-file = "LICENSE"
 version = "1.0.0"
 edition = "2021"
 
