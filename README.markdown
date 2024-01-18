@@ -36,19 +36,37 @@ $ echo '{
   --stdin-file
 ```
 
-# Iterate
+# Development
 
 Rust doesn't really cross-compile, so I rsync the source code to a Raspberry Pi (where this is to be running eventually) and execute there:
 
-```command
-$ cargo watch -- zsh -c 'rsync --progress --exclude-from=.rsyncignore -r -e ssh ./ kiosk:workspace/mqtt-blink1/ && ssh kiosk "cd workspace/mqtt-blink1; killall mqtt-blink1; cargo run"'
-```
+1. Once:
+
+    ```command
+    $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    ```
+
+1. Iterate
+
+    ```command
+    $ cargo watch -- zsh -c 'rsync --progress --exclude-from=.rsyncignore -r -e ssh ./ kiosk:workspace/mqtt-blink1/ \
+      && ssh kiosk "cd workspace/mqtt-blink1; killall mqtt-blink1; cargo run"'
+    ```
 
 The compiling machine must have OpenSSL dev headers. Check the [paho-mqtt](https://github.com/eclipse/paho.mqtt.rust) project for details.
 
+# Build
+
+```command
+$ cargo check \
+    && rsync --progress --exclude-from=.rsyncignore -r -e ssh ./ kiosk:workspace/mqtt-blink1/ \
+    && ssh kiosk "cd workspace/mqtt-blink1; cargo build --release"'
+$ scp kiosk:workspace/mqtt-blink1/target/release/mqtt-blink1 .
+```
+
 # TODO
 
-- CI/CD pipeline
+- CI/CD pipeline (needs a worker for native builds; I could not get any cross-compile options to work)
 - allow overriding the client id
 - find a simpler way to create the udev rules (see `go` branch)
 - Integrate with Home Assistant as light (using [auto discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery))

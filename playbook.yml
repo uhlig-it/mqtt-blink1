@@ -1,0 +1,14 @@
+- name: Deploy mqtt-blink1
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - role: suhlig.simple_systemd_service
+      vars:
+        program:
+          name: mqtt-blink1
+          binary: mqtt-blink1 # see README
+          description: Controls a Blink1 via MQTT
+          environment:
+            MQTT_URL: "{{ mqtt_url }}"
+      become: true
