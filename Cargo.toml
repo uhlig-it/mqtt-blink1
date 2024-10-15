@@ -4,13 +4,17 @@ description = "Controls a Blink1 device via MQTT"
 authors = ["Steffen Uhlig <steffen@familie-uhlig.net>"]
 repository = "https://github.com/uhlig-it/mqtt-blink1"
 license-file = "LICENSE"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
+
+[[bin]]
+name = "mqtt-blink1"
+path = "src/main.rs"
 
 [dependencies]
 blinkrs = "2.0.1"
 clap = { version = "4.4.16", features = ["derive"] }
-paho-mqtt = "0.12"
+paho-mqtt = { version = "0.12", default-features=false, features=["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.111"
 signal-hook = "0.3.17"
