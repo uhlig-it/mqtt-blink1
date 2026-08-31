@@ -3,7 +3,7 @@
   become: true
   gather_facts: true
   roles:
-    - role: suhlig.simple_systemd_service
+    - role: uhlig-it.simple_systemd_service
       vars:
         program:
           name: mqtt-blink1
