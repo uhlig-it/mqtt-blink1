@@ -56,6 +56,8 @@ jobs:
           # must fail so libusb1-sys builds its vendored copy with the cross compiler.
           echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> "$GITHUB_ENV"
       - name: Build
+        # cmake >= 4 rejects the bundled paho.mqtt.c's outdated cmake_minimum_required policy
+        env: {CMAKE_POLICY_VERSION_MINIMUM: "3.5"}
         run: cargo build --release --target ${{ matrix.target }}
       - name: Report glibc requirement (shop runs Debian 12, glibc 2.36)
         if: matrix.target == 'armv7-unknown-linux-gnueabihf'

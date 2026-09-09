@@ -25,4 +25,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
+        # cmake >= 4 rejects the bundled paho.mqtt.c's outdated cmake_minimum_required policy
+        env: {CMAKE_POLICY_VERSION_MINIMUM: "3.5"}
         run: cargo test

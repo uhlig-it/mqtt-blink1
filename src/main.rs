@@ -4,6 +4,7 @@ use mqtt::QOS_0;
 use paho_mqtt as mqtt;
 use serde_json::Result as SerdeJsonResult;
 use std::boxed::Box;
+use std::fmt;
 use std::io::Error;
 use std::time;
 use std::{env, process, thread, time::Duration};
@@ -69,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let hostname = url.host_str().expect("Error extracting the host");
-    let progname = progname().expect("Error determining the program name");
+    let progname = progname().unwrap_or_else(|e| panic!("Error determining the program name: {e}"));
 
     let create_options = mqtt::CreateOptionsBuilder::new()
         .server_uri(hostname)
@@ -128,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let neutral = blinkrs::Color::Three(0, 0, 0);
-    let neutral_c = blink1::Color{r: 0, g: 0, b: 0};
+    let neutral_c = blink1::Color { r: 0, g: 0, b: 0 };
 
     for msg in rx.iter() {
         if let Some(msg) = msg {
@@ -210,6 +211,16 @@ enum ProgError {
 impl From<Error> for ProgError {
     fn from(err: Error) -> ProgError {
         ProgError::Io(err)
+    }
+}
+
+impl fmt::Display for ProgError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProgError::NoFile => write!(f, "program executable file name not found"),
+            ProgError::NotUtf8 => write!(f, "program name is not valid UTF-8"),
+            ProgError::Io(err) => write!(f, "{err}"),
+        }
     }
 }
 

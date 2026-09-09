@@ -35,7 +35,11 @@ pub struct Blink {
 
 impl fmt::Display for Blink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Blink(frequency: {}, count: {}, color: {})", self.interval_ms, self.count, self.color)
+        write!(
+            f,
+            "Blink(frequency: {}, count: {}, color: {})",
+            self.interval_ms, self.count, self.color
+        )
     }
 }
 
@@ -53,10 +57,10 @@ mod tests {
             Ok(cmd) => match cmd {
                 Command::Blink { blink } => panic!("did not expect {}", blink),
                 Command::Color { color } => {
-                  assert_eq!(color.r, 127);
-                  assert_eq!(color.g, 12);
-                  assert_eq!(color.b, 24);
-                },
+                    assert_eq!(color.r, 127);
+                    assert_eq!(color.g, 12);
+                    assert_eq!(color.b, 24);
+                }
             },
             Err(e) => {
                 panic!("Unable to parse message: {}", e);
@@ -66,19 +70,19 @@ mod tests {
 
     #[test]
     fn test_deserialize_blink() {
-        let str = r#"{"blink":{"frequency":2,"color":{"r":13,"g":8,"b":247}}}"#;
+        let str = r#"{"blink":{"interval_ms":200,"color":{"r":13,"g":8,"b":247}}}"#;
 
         let result: serde_json::Result<Command> = serde_json::from_str(str);
 
         match result {
             Ok(cmd) => match cmd {
                 Command::Blink { blink } => {
-                  assert_eq!(blink.interval_ms, 200);
-                  assert_eq!(blink.count, 0);
-                  assert_eq!(blink.color.r, 13);
-                  assert_eq!(blink.color.g, 8);
-                  assert_eq!(blink.color.b, 247);
-                },
+                    assert_eq!(blink.interval_ms, 200);
+                    assert_eq!(blink.count, 0);
+                    assert_eq!(blink.color.r, 13);
+                    assert_eq!(blink.color.g, 8);
+                    assert_eq!(blink.color.b, 247);
+                }
                 Command::Color { color } => panic!("did not expect {}", color),
             },
             Err(e) => {
