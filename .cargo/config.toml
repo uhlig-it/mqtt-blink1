@@ -1,0 +1,4 @@
+# CMake >= 4 rejects the bundled paho.mqtt.c's outdated `cmake_minimum_required`
+# policy; same workaround as in .github/workflows/ci.yml.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
