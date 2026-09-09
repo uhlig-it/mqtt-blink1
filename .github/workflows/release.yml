@@ -3,6 +3,7 @@ on: {push: {tags: ["v*"]}}
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
@@ -31,10 +32,18 @@ jobs:
         if: contains(matrix.target, 'musl')
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools linux-libc-dev
           # Tell the cc crate (used by the bundled C dependencies) to use musl-gcc
           TARGET_CC_VAR="CC_$(echo ${{ matrix.target }} | tr - _)"
           echo "$TARGET_CC_VAR=musl-gcc" >> "$GITHUB_ENV"
+          # musl-gcc does not search /usr/include (it would pick up glibc headers),
+          # so the vendored libusb cannot find the Linux UAPI headers. Symlink them
+          # into the musl include dir instead.
+          ARCH=$(echo ${{ matrix.target }} | sed 's/-unknown-linux-musl$//')
+          MUSL_INCLUDE=/usr/include/${ARCH}-linux-musl
+          sudo ln -s /usr/include/linux "$MUSL_INCLUDE/linux"
+          sudo ln -s /usr/include/asm-generic "$MUSL_INCLUDE/asm-generic"
+          sudo ln -s /usr/include/${ARCH}-linux-gnu/asm "$MUSL_INCLUDE/asm"
       - name: Install ARM cross toolchain (armv7 gnueabihf target)
         if: matrix.target == 'armv7-unknown-linux-gnueabihf'
         run: |
