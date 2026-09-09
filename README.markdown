@@ -38,7 +38,7 @@ $ echo '{
 
 # Development
 
-Rust doesn't really cross-compile, so I rsync the source code to a Raspberry Pi (where this is to be running eventually) and execute there:
+For fast iteration, rsync the source code to a Raspberry Pi (where this is to be running eventually) and execute there:
 
 1. Once:
 
@@ -55,30 +55,20 @@ Rust doesn't really cross-compile, so I rsync the source code to a Raspberry Pi 
 
 # Build
 
-On a pi4:
+Tagged releases are built by GitHub Actions: push a `v*` tag and the [Release workflow](.github/workflows/release.yml) cross-compiles the binary for the Raspberry Pi ('shop': 32-bit armv7) plus the other targets and attaches them to a GitHub release.
+
+To build manually on a Pi (32-bit armv7):
 
 ```command
-$ cargo check \
-      && rsync --progress --exclude-from=.rsyncignore -r -e ssh ./ kiosk:workspace/mqtt-blink1/ \
-      && ssh kiosk "cd workspace/mqtt-blink1; cargo build --release" \
-      && scp kiosk:workspace/mqtt-blink1/target/release/mqtt-blink1 .
+$ rsync --progress --exclude-from=.rsyncignore -r -e ssh ./ <host>:workspace/mqtt-blink1/ \
+    && ssh <host> "cd workspace/mqtt-blink1; cargo build --release" \
+    && scp <host>:workspace/mqtt-blink1/target/release/mqtt-blink1 .
 ```
 
-The Ansible playbook will then copy it to the target machine.
-
-WIP On a pi5 with Docker:
-
-```command
-$ cargo check \
-    && rsync --progress --exclude-from=.rsyncignore -r -e ssh ./ pi5:workspace/mqtt-blink1/ \
-    && ssh pi5 "cd workspace/mqtt-blink1; docker build . -t mqtt-blink1-builder"
-$ sudo docker cp mqtt-blink1-builder:/usr/local/bin/mqtt-blink1 .
-$ scp pi5:workspace/mqtt-blink1/mqtt-blink1 .
-```
+The Ansible playbook will then copy the binary to the target machine.
 
 # TODO
 
-- CI/CD pipeline (needs a worker for native builds; I could not get any cross-compile options to work)
 - allow overriding the client id
 - find a simpler way to create the udev rules (see `go` branch)
 - Integrate with Home Assistant as light (using [auto discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery))
