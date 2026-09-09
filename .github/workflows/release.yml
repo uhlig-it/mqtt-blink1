@@ -1,0 +1,76 @@
+name: Release
+on: {push: {tags: ["v*"]}}
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            asset: mqtt-blink1-linux-amd64.tar.gz
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            asset: mqtt-blink1-linux-arm64.tar.gz
+          # 32-bit armhf for the Raspberry Pi ('shop': armv7l, Raspbian bookworm)
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-latest
+            asset: mqtt-blink1-linux-armv7.tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            asset: mqtt-blink1-darwin-amd64.tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            asset: mqtt-blink1-darwin-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with: {targets: "${{ matrix.target }}"}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install musl-tools (Linux musl targets)
+        if: contains(matrix.target, 'musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          # Tell the cc crate (used by the bundled C dependencies) to use musl-gcc
+          TARGET_CC_VAR="CC_$(echo ${{ matrix.target }} | tr - _)"
+          echo "$TARGET_CC_VAR=musl-gcc" >> "$GITHUB_ENV"
+      - name: Install ARM cross toolchain (armv7 gnueabihf target)
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+          # rustc defaults to the host `cc` for cross targets; hand it the ARM
+          # linker. Everything else (compiler, ar) is found by the cc crate / CMake
+          # itself: cc maps armv7-unknown-linux-gnueabihf to an arm-linux-gnueabihf
+          # prefix. Do NOT set PKG_CONFIG_ALLOW_CROSS: the libusb pkg-config probe
+          # must fail so libusb1-sys builds its vendored copy with the cross compiler.
+          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> "$GITHUB_ENV"
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Report glibc requirement (shop runs Debian 12, glibc 2.36)
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          MAX_GLIBC=$(objdump -T target/${{ matrix.target }}/release/mqtt-blink1 \
+            | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Binary requires at most glibc ${MAX_GLIBC#GLIBC_}; target host has 2.36"
+      - name: Compress binary
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.asset }} mqtt-blink1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true
