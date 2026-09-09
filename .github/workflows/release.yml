@@ -54,17 +54,25 @@ jobs:
           # itself: cc maps armv7-unknown-linux-gnueabihf to an arm-linux-gnueabihf
           # prefix. Do NOT set PKG_CONFIG_ALLOW_CROSS: the libusb pkg-config probe
           # must fail so libusb1-sys builds its vendored copy with the cross compiler.
+          # Build with -std=gnu17: gcc >= 15 defaults to gnu23, and glibc 2.39 then
+          # redirects strtol/sscanf/strtoul to __isoc23_* (GLIBC_2.38), which would
+          # not run on shop's glibc 2.36.
           echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> "$GITHUB_ENV"
+          echo "CFLAGS=-std=gnu17" >> "$GITHUB_ENV"
       - name: Build
         # cmake >= 4 rejects the bundled paho.mqtt.c's outdated cmake_minimum_required policy
         env: {CMAKE_POLICY_VERSION_MINIMUM: "3.5"}
         run: cargo build --release --target ${{ matrix.target }}
-      - name: Report glibc requirement (shop runs Debian 12, glibc 2.36)
+      - name: Verify glibc requirement (shop runs Debian 12, glibc 2.36)
         if: matrix.target == 'armv7-unknown-linux-gnueabihf'
         run: |
-          MAX_GLIBC=$(objdump -T target/${{ matrix.target }}/release/mqtt-blink1 \
+          HIGHEST=$(objdump -T target/${{ matrix.target }}/release/mqtt-blink1 \
             | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          echo "Binary requires at most glibc ${MAX_GLIBC#GLIBC_}; target host has 2.36"
+          echo "Binary requires at most glibc ${HIGHEST#GLIBC_}; target host has 2.36"
+          if [ -n "$HIGHEST" ] && [ "$(printf '%s\n2.36' "${HIGHEST#GLIBC_}" | sort -V | tail -1)" != "2.36" ]; then
+            echo "::error::armv7 binary requires glibc ${HIGHEST#GLIBC_} but shop has 2.36"
+            exit 1
+          fi
       - name: Compress binary
         run: |
           cd target/${{ matrix.target }}/release
