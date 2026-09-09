@@ -12,8 +12,11 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
             asset: mqtt-blink1-linux-arm64.tar.gz
-          # 32-bit armhf for the Raspberry Pi ('shop': armv7l, Raspbian bookworm)
-          - target: armv7-unknown-linux-gnueabihf
+          # 32-bit armhf for the Raspberry Pi ('shop': armv7l, Raspbian bookworm).
+          # Static musl: glibc 2.38+ (Ubuntu runners) redirects strtol/sscanf/strtoul
+          # to __isoc23_* (requires GLIBC_2.38), so a glibc build would not run on
+          # shop's glibc 2.36. musl has no such symbol versioning.
+          - target: armv7-unknown-linux-musleabihf
             os: ubuntu-latest
             asset: mqtt-blink1-linux-armv7.tar.gz
           - target: x86_64-apple-darwin
@@ -29,7 +32,7 @@ jobs:
         with: {targets: "${{ matrix.target }}"}
       - uses: Swatinem/rust-cache@v2
       - name: Install musl-tools (Linux musl targets)
-        if: contains(matrix.target, 'musl')
+        if: contains(matrix.target, 'unknown-linux-musl')
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools linux-libc-dev
@@ -44,33 +47,29 @@ jobs:
           sudo ln -s /usr/include/linux "$MUSL_INCLUDE/linux"
           sudo ln -s /usr/include/asm-generic "$MUSL_INCLUDE/asm-generic"
           sudo ln -s /usr/include/${ARCH}-linux-gnu/asm "$MUSL_INCLUDE/asm"
-      - name: Install ARM cross toolchain (armv7 gnueabihf target)
-        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+      - name: Install ARM musl cross toolchain (armv7 musleabihf target)
+        if: matrix.target == 'armv7-unknown-linux-musleabihf'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf
-          # rustc defaults to the host `cc` for cross targets; hand it the ARM
-          # linker. Everything else (compiler, ar) is found by the cc crate / CMake
-          # itself: cc maps armv7-unknown-linux-gnueabihf to an arm-linux-gnueabihf
-          # prefix. Do NOT set PKG_CONFIG_ALLOW_CROSS: the libusb pkg-config probe
-          # must fail so libusb1-sys builds its vendored copy with the cross compiler.
-          # -U_ISOC2X_SOURCE: gcc >= 13 with _GNU_SOURCE (added by the cc crate on
-          # Linux) makes glibc 2.38+ redirect strtol/sscanf/strtoul to __isoc23_*
-          # (GLIBC_2.38), which would not run on shop's glibc 2.36. Undefining just
-          # that feature-test macro keeps GNU extensions but stops the redirect.
-          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> "$GITHUB_ENV"
-          echo "CFLAGS=-std=gnu17 -U_ISOC2X_SOURCE" >> "$GITHUB_ENV"
+          # Prebuilt static musl cross toolchain from musl.cc; ships its own sysroot
+          # incl. Linux headers and musl libc. The cc crate / CMake find
+          # arm-linux-musleabihf-gcc themselves (cc maps this target triple to the
+          # arm-linux-musleabihf prefix).
+          curl -fsSL https://musl.cc/arm-linux-musleabihf-cross.tgz | tar xz -C /tmp
+          echo "/tmp/arm-linux-musleabihf-cross/bin" >> "$GITHUB_PATH"
+          # rustc defaults to the host `cc` for cross targets; hand it the ARM linker
+          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
       - name: Build
         # cmake >= 4 rejects the bundled paho.mqtt.c's outdated cmake_minimum_required policy
         env: {CMAKE_POLICY_VERSION_MINIMUM: "3.5"}
         run: cargo build --release --target ${{ matrix.target }}
-      - name: Verify glibc requirement (shop runs Debian 12, glibc 2.36)
-        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+      - name: Verify no glibc dependency (shop runs Debian 12, glibc 2.36)
+        if: matrix.target == 'armv7-unknown-linux-musleabihf'
         run: |
           HIGHEST=$(objdump -T target/${{ matrix.target }}/release/mqtt-blink1 \
             | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          echo "Binary requires at most glibc ${HIGHEST#GLIBC_}; target host has 2.36"
-          if [ -n "$HIGHEST" ] && [ "$(printf '%s\n2.36' "${HIGHEST#GLIBC_}" | sort -V | tail -1)" != "2.36" ]; then
+          if [ -z "$HIGHEST" ]; then
+            echo "Binary is fully static: no glibc dependency"
+          else
             echo "::error::armv7 binary requires glibc ${HIGHEST#GLIBC_} but shop has 2.36"
             exit 1
           fi
