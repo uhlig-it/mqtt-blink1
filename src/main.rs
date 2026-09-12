@@ -3,8 +3,6 @@ use clap::Parser;
 use mqtt::QOS_0;
 use paho_mqtt as mqtt;
 use serde_json::Result as SerdeJsonResult;
-use std::boxed::Box;
-use std::time;
 use std::{env, process, thread, time::Duration};
 use url::Url;
 
@@ -60,8 +58,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let urlstr = env::var("MQTT_URL").unwrap_or_else(|e| {
-        eprintln!("Error fetching the MQTT_URL: {:?}", e);
+    // $MQTT_URL is deliberately read directly — it must not be exposed on the
+    // CLI (flag or positional): a URL may carry user:pass credentials.
+    let urlstr = env::var("MQTT_URL").unwrap_or_else(|_| {
+        eprintln!("Error: $MQTT_URL not set");
         process::exit(1);
     });
 
@@ -186,7 +186,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // service (§2.3).
                     if let Err(e) = handle_command(
                         &|m| blink1.send(m).map(|_| ()).map_err(|e| e.to_string()),
-                        &|topic, color| publish_status(&client, topic.to_string(), color),
+                        &|topic, color| publish_status(&client, topic, color),
                         &options.status_topic,
                         &cmd,
                     ) {
@@ -286,14 +286,14 @@ impl Iterator for ReconnectSchedule {
     }
 }
 
-/// Executes a parsed `Command`. USB (`send`) and status-publish errors are
-/// returned to the caller, which logs them and continues — they must never
-/// abort the service or leave the blink loop running blindly (§2.3). If the
-/// USB write itself failed, the LED's actual color is unknown; the next
-/// command will reset it.
+/// Executes a parsed `Command`. USB (`send`) errors are returned to the
+/// caller, which logs them and continues — they must never abort the service
+/// or leave the blink loop running blindly (§2.3). Status-publish errors are
+/// logged inside `publish_status` and ignored (§4.5). If the USB write itself
+/// failed, the LED's actual color is unknown; the next command will reset it.
 fn handle_command(
     send: &dyn Fn(blinkrs::Message) -> Result<(), String>,
-    publish: &dyn Fn(&str, &blink1::Color) -> Result<(), String>,
+    publish: &dyn Fn(&str, &blink1::Color),
     status_topic: &str,
     cmd: &blink1::Command,
 ) -> Result<(), String> {
@@ -306,19 +306,17 @@ fn handle_command(
             // (§3.2): the caller logs the error and ignores the message.
             blink.validate()?;
 
-            let interval = time::Duration::from_millis(blink.interval_ms);
+            let interval = Duration::from_millis(blink.interval_ms);
             let color = blinkrs::Color::Three(blink.color.r, blink.color.g, blink.color.b);
 
             for _ in 0..blink.count {
                 send(Message::Immediate(color, None))
                     .map_err(|e| format!("Error sending blink color: {e}"))?;
-                publish(status_topic, &blink.color)
-                    .map_err(|e| format!("Error publishing status: {e}"))?;
+                publish(status_topic, &blink.color);
                 thread::sleep(interval);
                 send(Message::Immediate(neutral, None))
                     .map_err(|e| format!("Error sending neutral color: {e}"))?;
-                publish(status_topic, &neutral_c)
-                    .map_err(|e| format!("Error publishing status: {e}"))?;
+                publish(status_topic, &neutral_c);
                 thread::sleep(interval);
             }
             Ok(())
@@ -330,7 +328,7 @@ fn handle_command(
             ))
             .map_err(|e| format!("Error sending color: {e}"))?;
 
-            publish(status_topic, color).map_err(|e| format!("Error publishing status: {e}"))?;
+            publish(status_topic, color);
             Ok(())
         }
     }
@@ -353,21 +351,24 @@ fn default_client_id(host: &str) -> String {
     id
 }
 
-fn publish_status(client: &mqtt::Client, t: String, color: &blink1::Color) -> Result<(), String> {
-    let result = serde_json::to_string(&color);
-
-    match result {
+/// Publishes the current color as a retained status message (§4.5, §4.6):
+/// late subscribers and Home Assistant integrations (README TODO) see the
+/// current color immediately. Errors are logged and ignored — they must not
+/// abort the service (§2.3).
+fn publish_status(client: &mqtt::Client, topic: &str, color: &blink1::Color) {
+    match serde_json::to_string(&color) {
         Ok(m) => {
-            let msg = mqtt::MessageBuilder::new().topic(t).payload(m).finalize();
+            let msg = mqtt::MessageBuilder::new()
+                .topic(topic)
+                .payload(m)
+                .retained(true)
+                .finalize();
 
-            let result = client.publish(msg);
-
-            match result {
-                Ok(o) => Ok(o),
-                Err(e) => Err(e.to_string()),
+            if let Err(e) = client.publish(msg) {
+                eprintln!("Error publishing status: {e}");
             }
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => eprintln!("Error serializing status: {e}"),
     }
 }
 
@@ -439,7 +440,7 @@ mod tests {
             *calls.borrow_mut() += 1;
             Ok(())
         };
-        let publish = |_: &str, _: &blink1::Color| -> Result<(), String> { Ok(()) };
+        let publish = |_: &str, _: &blink1::Color| {};
 
         let cmd = blink1::Command::Blink {
             blink: blink1::Blink {
@@ -493,9 +494,8 @@ mod tests {
             }
         };
         let published: RefCell<Vec<(String, u8)>> = RefCell::new(Vec::new());
-        let publish = |topic: &str, color: &blink1::Color| -> Result<(), String> {
+        let publish = |topic: &str, color: &blink1::Color| {
             published.borrow_mut().push((topic.to_string(), color.b));
-            Ok(())
         };
 
         let cmd = blink1::Command::Color {
@@ -520,7 +520,7 @@ mod tests {
     #[test]
     fn handle_command_color_returns_err_on_send_failure() {
         let send = |_: blinkrs::Message| -> Result<(), String> { Err("usb gone".to_string()) };
-        let publish = |_: &str, _: &blink1::Color| -> Result<(), String> { Ok(()) };
+        let publish = |_: &str, _: &blink1::Color| {};
 
         let cmd = blink1::Command::Color {
             color: blink1::Color {
@@ -536,27 +536,23 @@ mod tests {
     }
 
     #[test]
-    fn handle_command_color_returns_err_on_publish_failure() {
-        let send = |msg: blinkrs::Message| -> Result<(), String> {
-            match msg {
-                blinkrs::Message::Immediate(_, None) => Ok(()),
-                other => Err(format!("unexpected message: {other:?}")),
-            }
-        };
-        let publish =
-            |_: &str, _: &blink1::Color| -> Result<(), String> { Err("broker down".to_string()) };
+    fn publish_status_logs_and_ignores_publish_errors() {
+        let client = mqtt::Client::new(
+            mqtt::CreateOptionsBuilder::new()
+                .server_uri("tcp://127.0.0.1:1")
+                .client_id("unittest")
+                .finalize(),
+        )
+        .unwrap();
 
-        let cmd = blink1::Command::Color {
-            color: blink1::Color {
-                r: 10,
-                g: 20,
-                b: 30,
-            },
-        };
-
-        let result = handle_command(&send, &publish, "t", &cmd);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("broker down"));
+        // An unconnected client cannot publish: publish_status must log the
+        // failure and return — like §2.3, a publish error must not abort the
+        // service (§4.5).
+        publish_status(
+            &client,
+            "unittest/status",
+            &blink1::Color { r: 1, g: 2, b: 3 },
+        );
     }
 
     #[test]
@@ -572,9 +568,8 @@ mod tests {
             }
         };
         let published: RefCell<Vec<(String, u8)>> = RefCell::new(Vec::new());
-        let publish = |topic: &str, color: &blink1::Color| -> Result<(), String> {
+        let publish = |topic: &str, color: &blink1::Color| {
             published.borrow_mut().push((topic.to_string(), color.b));
-            Ok(())
         };
 
         let cmd = blink1::Command::Blink {
@@ -614,7 +609,7 @@ mod tests {
             *calls.borrow_mut() += 1;
             Err("usb gone".to_string())
         };
-        let publish = |_: &str, _: &blink1::Color| -> Result<(), String> { Ok(()) };
+        let publish = |_: &str, _: &blink1::Color| {};
 
         let cmd = blink1::Command::Blink {
             blink: blink1::Blink {

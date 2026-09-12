@@ -1,6 +1,7 @@
 # mqtt-blink1 — Future Improvements Plan
 
-Status: analysis complete; **P0 implemented 2026-09-12** (§2 below), P1–P3 still open. Scope decision (2026-09-12):
+Status: analysis complete; **P0 implemented 2026-09-12** (§2 below), **P1 implemented
+2026-09-12** (commit `5feddc0`), **P2 implemented 2026-09-12** (§4 below), P3 still open. Scope decision (2026-09-12):
 the broker is on the same host (`localhost:1883`), so **TLS enablement is deferred**
 (§8); the URI-handling fix is kept as a correctness fix (§3.1); the stability
 items were promoted to P0 (§2).
@@ -275,6 +276,21 @@ was lost. Same treatment: log and let §2.2's reconnect loop decide.
 
 ## 4. Priority P2 — Cleanup & simplification
 
+> Status: **implemented 2026-09-12** — all six items below. §4.4 diverges from the
+> plan: `MQTT_URL` stays **env-only** (`std::env::var` + friendly error) and is
+> deliberately *not* exposed via clap — neither `--mqtt-url` nor a positional —
+> because the URL may carry `user:pass` credentials and must not be passable on
+> the CLI (process listings). clap keeps only the `derive` feature. Status
+> publishes use `retained(true)` (§4.6); mosquitto's default accepts retained
+> messages.
+>
+> - [x] 4.1 Remove unused `signal-hook` dependency
+> - [x] 4.2 Import cleanup (`src/main.rs:1-11`)
+> - [x] 4.3 Delete `progname()` / `ProgError` machinery
+> - [x] 4.4 Read `MQTT_URL` via clap's `env` feature — *reimplemented: env-only, see status above*
+> - [x] 4.5 `publish_status` error type — *log-and-ignore, returns `()`*
+> - [x] 4.6 Publish status with `retain(true)`
+
 ### 4.1 Remove unused `signal-hook` dependency
 
 Declared in `Cargo.toml:20`, never imported in `src/` (confirmed by grep).
@@ -294,6 +310,10 @@ impls, and the `progname` fn. Confirmed: `use std::fmt;` and
 unused too — remove them.
 
 ### 4.4 Read `MQTT_URL` via clap's `env` feature
+
+> Result (2026-09-12): **not implemented as specified** — `MQTT_URL` stays
+> env-only via `std::env::var` with a friendly error (see the Status block
+> above for the reasoning). The clap snippet below is kept for reference only.
 
 `main.rs:58-70`: the manual `env::var` + `process::exit` dance becomes:
 
