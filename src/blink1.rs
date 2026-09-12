@@ -24,6 +24,12 @@ impl fmt::Display for Color {
     }
 }
 
+// Defense in depth (§3.2): cap blink parameters so that a single message
+// cannot monopolize the service in a USB-write busy loop — the blink loop
+// runs synchronously in the consuming thread.
+const MAX_BLINK_COUNT: u64 = 100;
+const MIN_BLINK_INTERVAL_MS: u64 = 10;
+
 #[derive(Deserialize, Serialize)]
 pub struct Blink {
     #[serde(default)]
@@ -31,6 +37,26 @@ pub struct Blink {
     #[serde(default)]
     pub count: u64,
     pub color: Color,
+}
+
+impl Blink {
+    /// Rejects parameters outside the caps (§3.2). The caller logs the
+    /// returned error and ignores the message instead of executing it.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.count > MAX_BLINK_COUNT {
+            return Err(format!(
+                "blink count {} exceeds the maximum of {MAX_BLINK_COUNT}",
+                self.count
+            ));
+        }
+        if self.interval_ms < MIN_BLINK_INTERVAL_MS {
+            return Err(format!(
+                "blink interval {}ms is below the minimum of {MIN_BLINK_INTERVAL_MS}ms",
+                self.interval_ms
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for Blink {
@@ -46,6 +72,54 @@ impl fmt::Display for Blink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- §3.2: blink parameter caps (boundary values) ---
+
+    #[test]
+    fn test_blink_validate_accepts_boundary_values() {
+        let blink = Blink {
+            interval_ms: MIN_BLINK_INTERVAL_MS,
+            count: MAX_BLINK_COUNT,
+            color: Color { r: 255, g: 0, b: 0 },
+        };
+
+        assert!(blink.validate().is_ok());
+    }
+
+    #[test]
+    fn test_blink_validate_rejects_count_above_max() {
+        let blink = Blink {
+            interval_ms: MIN_BLINK_INTERVAL_MS,
+            count: MAX_BLINK_COUNT + 1,
+            color: Color { r: 255, g: 0, b: 0 },
+        };
+
+        assert!(blink.validate().is_err());
+    }
+
+    #[test]
+    fn test_blink_validate_rejects_interval_below_min() {
+        let blink = Blink {
+            interval_ms: MIN_BLINK_INTERVAL_MS - 1,
+            count: 0,
+            color: Color { r: 255, g: 0, b: 0 },
+        };
+
+        assert!(blink.validate().is_err());
+    }
+
+    #[test]
+    fn test_blink_validate_accepts_default_count_zero() {
+        // `count` defaults to 0 (a no-op blink, see `test_deserialize_blink`)
+        // — the caps must leave that default alone.
+        let blink = Blink {
+            interval_ms: MIN_BLINK_INTERVAL_MS,
+            count: 0,
+            color: Color { r: 255, g: 0, b: 0 },
+        };
+
+        assert!(blink.validate().is_ok());
+    }
 
     #[test]
     fn test_deserialize_color() {

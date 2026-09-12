@@ -4,7 +4,6 @@ Controls a Blink1 via MQTT
 
 # TODO
 
-- allow overriding the client id
 - find a simpler way to create the udev rules (see `go` branch)
 - Integrate with Home Assistant as light (using [auto discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery))
 

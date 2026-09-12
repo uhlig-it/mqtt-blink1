@@ -4,8 +4,6 @@ use mqtt::QOS_0;
 use paho_mqtt as mqtt;
 use serde_json::Result as SerdeJsonResult;
 use std::boxed::Box;
-use std::fmt;
-use std::io::Error;
 use std::time;
 use std::{env, process, thread, time::Duration};
 use url::Url;
@@ -45,6 +43,10 @@ pub struct Args {
     /// Topic where the device publishes status changes on
     #[arg(short('s'), long, default_value = "werkstatt/blink1/status")]
     status_topic: String,
+
+    /// MQTT client ID; defaults to "mqtt-blink1-<broker host>"
+    #[arg(long)]
+    client_id: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -72,12 +74,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         process::exit(1);
     });
 
-    let hostname = url.host_str().expect("Error extracting the host");
-    let progname = progname().unwrap_or_else(|e| panic!("Error determining the program name: {e}"));
+    // Preserve the scheme and the explicit port from $MQTT_URL (§3.1): the
+    // old code silently dropped both and always connected to tcp://1883.
+    // TLS schemes fail loudly instead of downgrading to cleartext — the `ssl`
+    // feature is not compiled in, so the connection could never work anyway.
+    let scheme = url.scheme();
+    let transport = match scheme {
+        "mqtt" | "tcp" => "tcp",
+        "ws" => "ws",
+        "wss" => "wss",
+        "mqtts" | "ssl" | "tls" => {
+            // TLS is not compiled in and is out of scope for this pass;
+            // revisit this arm when TLS is added.
+            eprintln!("Error in $MQTT_URL: scheme '{scheme}' requires TLS, which is not enabled");
+            process::exit(1);
+        }
+        other => {
+            eprintln!("Unsupported scheme in $MQTT_URL: {other}");
+            process::exit(1);
+        }
+    };
+
+    let host = match url.host_str() {
+        Some(h) => h,
+        None => {
+            eprintln!("Error in $MQTT_URL: no host given");
+            process::exit(1);
+        }
+    };
+
+    // `url.host_str()` returns IPv6 literals without brackets; paho needs
+    // them re-bracketed in the URI.
+    let host_uri = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    let server_uri = match url.port() {
+        Some(port) => format!("{transport}://{host_uri}:{port}"),
+        None => format!("{transport}://{host_uri}"),
+    };
+
+    // A per-broker client ID instead of the constant program name: the old
+    // ID made every instance kick the others off the broker (§3.3).
+    let client_id = match options.client_id {
+        Some(id) => id,
+        None => default_client_id(host),
+    };
 
     let create_options = mqtt::CreateOptionsBuilder::new()
-        .server_uri(hostname)
-        .client_id(progname)
+        .server_uri(server_uri)
+        .client_id(client_id)
         .finalize();
 
     let mut conn_opts = mqtt::ConnectOptionsBuilder::new();
@@ -155,14 +202,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // The message stream ends when the connection is lost — at which point
+    // `rx.iter()` has already yielded `None` and §2.2's reconnect loop takes
+    // over — so this section is mostly defensive (§3.4). Collapsed from two
+    // dead blocks; log failed calls instead of panicking.
     if client.is_connected() {
         println!("\nDisconnecting...");
-        client.disconnect(None).unwrap();
-    }
-
-    if client.is_connected() {
-        client.unsubscribe(&options.command_topic).unwrap();
-        client.disconnect(None).unwrap();
+        if let Err(e) = client.unsubscribe(&options.command_topic) {
+            eprintln!(
+                "Error unsubscribing from '{}': {e:?}",
+                options.command_topic
+            );
+        }
+        if let Err(e) = client.disconnect(None) {
+            eprintln!("Error disconnecting: {e:?}");
+        }
     }
 
     println!("Cleaning up...");
@@ -248,6 +302,10 @@ fn handle_command(
 
     match cmd {
         blink1::Command::Blink { blink } => {
+            // Reject out-of-range parameters instead of executing them
+            // (§3.2): the caller logs the error and ignores the message.
+            blink.validate()?;
+
             let interval = time::Duration::from_millis(blink.interval_ms);
             let color = blinkrs::Color::Three(blink.color.r, blink.color.g, blink.color.b);
 
@@ -278,37 +336,21 @@ fn handle_command(
     }
 }
 
-#[derive(Debug)]
-enum ProgError {
-    NoFile,
-    NotUtf8,
-    Io(Error),
-}
+/// Derives the default MQTT client ID from the broker host (§3.3), truncated
+/// to the MQTT 3.1.1 23-char client-ID limit.
+fn default_client_id(host: &str) -> String {
+    const PREFIX: &str = "mqtt-blink1-";
+    const MAX_LEN: usize = 23;
 
-impl From<Error> for ProgError {
-    fn from(err: Error) -> ProgError {
-        ProgError::Io(err)
-    }
-}
-
-impl fmt::Display for ProgError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ProgError::NoFile => write!(f, "program executable file name not found"),
-            ProgError::NotUtf8 => write!(f, "program name is not valid UTF-8"),
-            ProgError::Io(err) => write!(f, "{err}"),
+    let mut id = String::with_capacity(PREFIX.len() + host.len().min(MAX_LEN - PREFIX.len()));
+    id.push_str(PREFIX);
+    for ch in host.chars() {
+        if id.len() + ch.len_utf8() > MAX_LEN {
+            break;
         }
+        id.push(ch);
     }
-}
-
-// https://stackoverflow.com/a/36859137/3212907
-fn progname() -> Result<String, ProgError> {
-    Ok(env::current_exe()?
-        .file_name()
-        .ok_or(ProgError::NoFile)?
-        .to_str()
-        .ok_or(ProgError::NotUtf8)?
-        .to_owned())
+    id
 }
 
 fn publish_status(client: &mqtt::Client, t: String, color: &blink1::Color) -> Result<(), String> {
@@ -386,6 +428,54 @@ mod tests {
         // An unconnected client cannot subscribe: the helper must report the
         // failure instead of panicking or exiting the process.
         assert!(!subscribe_command_topic(&client, "unittest/topic"));
+    }
+
+    // --- §3.2: blink parameter caps ---
+
+    #[test]
+    fn handle_command_blink_rejects_out_of_range_parameters() {
+        let calls = RefCell::new(0u32);
+        let send = |_: blinkrs::Message| -> Result<(), String> {
+            *calls.borrow_mut() += 1;
+            Ok(())
+        };
+        let publish = |_: &str, _: &blink1::Color| -> Result<(), String> { Ok(()) };
+
+        let cmd = blink1::Command::Blink {
+            blink: blink1::Blink {
+                interval_ms: 0,   // below MIN_BLINK_INTERVAL_MS
+                count: 1_000_000, // above MAX_BLINK_COUNT
+                color: blink1::Color { r: 1, g: 1, b: 1 },
+            },
+        };
+
+        let result = handle_command(&send, &publish, "t", &cmd);
+        // A rejected blink must not execute at all (§3.2): the error is
+        // logged by the caller and the message is ignored.
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("maximum"));
+        assert_eq!(*calls.borrow(), 0);
+    }
+
+    // --- §3.3: unique client ID ---
+
+    #[test]
+    fn default_client_id_uses_broker_host() {
+        assert_eq!(default_client_id("shop"), "mqtt-blink1-shop");
+    }
+
+    #[test]
+    fn default_client_id_truncates_to_mqtt_limit() {
+        // MQTT 3.1.1 caps client IDs at 23 chars; the prefix takes 12.
+        let id = default_client_id("a-very-long-host-name.example.org");
+
+        assert_eq!(id.len(), 23);
+        assert!(id.starts_with("mqtt-blink1-"));
+    }
+
+    #[test]
+    fn default_client_id_handles_ipv6_hosts() {
+        assert_eq!(default_client_id("::1"), "mqtt-blink1-::1");
     }
 
     // --- §2.3: USB/status-publish errors must not abort the service ---
@@ -489,7 +579,7 @@ mod tests {
 
         let cmd = blink1::Command::Blink {
             blink: blink1::Blink {
-                interval_ms: 0,
+                interval_ms: 10, // at MIN_BLINK_INTERVAL_MS (§3.2)
                 count: 2,
                 color: blink1::Color { r: 1, g: 2, b: 3 },
             },
@@ -528,8 +618,8 @@ mod tests {
 
         let cmd = blink1::Command::Blink {
             blink: blink1::Blink {
-                interval_ms: 0,
-                count: 1_000_000,
+                interval_ms: 10, // at MIN_BLINK_INTERVAL_MS (§3.2)
+                count: 100,      // at MAX_BLINK_COUNT (§3.2)
                 color: blink1::Color { r: 1, g: 1, b: 1 },
             },
         };
