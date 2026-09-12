@@ -46,6 +46,22 @@ $ echo '{
 
 Tagged releases are built by GitHub Actions: push a `v*` tag and the [Release workflow](.github/workflows/release.yml) cross-compiles the binary for the Raspberry Pi ('shop': 32-bit armv7) plus the other targets and attaches them to a GitHub release.
 
+# Tests
+
+Unit tests cover the MQTT command parsing (`src/blink1.rs`) and the stability logic in `src/main.rs` (reconnect backoff, the re-subscribe helper, and non-fatal message handling). They need neither a broker nor a Blink1 device; run them with:
+
+```sh
+cargo test
+```
+
+The full validation suite — also run by [CI](.github/workflows/ci.yml) on every push and pull request to `main`:
+
+```sh
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
 # FAQ
 
 ## Why Rust?
