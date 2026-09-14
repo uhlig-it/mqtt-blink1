@@ -53,26 +53,32 @@ jobs:
       - name: Install ARMv7 musl cross toolchain (armv7-unknown-linux-musleabihf target)
         if: matrix.target == 'armv7-unknown-linux-musleabihf'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y linux-libc-dev-armhf-cross
-          # rustc defaults to the host `cc` for cross targets; hand it the ARMv7
-          # musl linker. CC is what the cc crate and CMake use for the bundled C
-          # dependencies (paho.mqtt.c, libusb). Do NOT set PKG_CONFIG_ALLOW_CROSS:
-          # the libusb pkg-config probe must fail so libusb1-sys builds its
-          # vendored copy with the cross compiler.
-          curl -fsSL --retry 3 -o /tmp/arm-linux-musleabihf-cross.tgz https://musl.cc/arm-linux-musleabihf-cross.tgz
-          sudo tar -xzf /tmp/arm-linux-musleabihf-cross.tgz -C /opt
+          # musl.cc is unreachable from GitHub-hosted runners (connect timeouts),
+          # so the toolchain is extracted from the cross-rs container image on
+          # ghcr.io instead (GitHub's own registry): the image embeds the same
+          # musl.cc arm-linux-musleabihf toolchain that `cross` uses, and its
+          # sysroot already bundles the kernel UAPI headers (linux/, asm/, ...)
+          # the vendored libusb needs. Digest-pinned for reproducibility.
+          IMAGE=ghcr.io/cross-rs/armv7-unknown-linux-musleabihf@sha256:b4f481f30ceca34730a5723f717396d762d94f6eddd7e1cf7c7862d1377ff98c
+          docker pull "$IMAGE"
+          docker create --name armv7-musl-tc "$IMAGE"
+          sudo mkdir -p /opt/arm-linux-musleabihf-cross/bin \
+            /opt/arm-linux-musleabihf-cross/arm-linux-musleabihf \
+            /opt/arm-linux-musleabihf-cross/lib/gcc \
+            /opt/arm-linux-musleabihf-cross/libexec/gcc
+          sudo docker cp armv7-musl-tc:/usr/local/bin/. /opt/arm-linux-musleabihf-cross/bin/
+          sudo docker cp armv7-musl-tc:/usr/local/arm-linux-musleabihf/. /opt/arm-linux-musleabihf-cross/arm-linux-musleabihf/
+          sudo docker cp armv7-musl-tc:/usr/local/lib/gcc/. /opt/arm-linux-musleabihf-cross/lib/gcc/
+          sudo docker cp armv7-musl-tc:/usr/local/libexec/gcc/. /opt/arm-linux-musleabihf-cross/libexec/gcc/
+          docker rm armv7-musl-tc
+          # The image's bin/ also carries its own cmake and other tools which
+          # are broken outside the container; strip them so the runner's
+          # /usr/bin/cmake is used instead.
+          sudo rm -f /opt/arm-linux-musleabihf-cross/bin/{cmake,cmake-gui,ccmake,cpack,ctest,xargo,xargo-check,qemu-arm}
           echo "/opt/arm-linux-musleabihf-cross/bin" >> "$GITHUB_PATH"
           echo "CC=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
           echo "CC_armv7_unknown_linux_musleabihf=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
-          # The musl cross-gcc ships its own libc headers but no kernel headers,
-          # so the vendored libusb cannot find the Linux UAPI headers. Symlink
-          # them in (same idea as the musl-tools step above).
-          MUSL_INCLUDE=/opt/arm-linux-musleabihf-cross/arm-linux-musleabihf/include
-          sudo ln -s /usr/arm-linux-gnueabihf/include/linux "$MUSL_INCLUDE/linux"
-          sudo ln -s /usr/arm-linux-gnueabihf/include/asm "$MUSL_INCLUDE/asm"
-          sudo ln -s /usr/arm-linux-gnueabihf/include/asm-generic "$MUSL_INCLUDE/asm-generic"
       - name: Build
         # cmake >= 4 rejects the bundled paho.mqtt.c's outdated cmake_minimum_required policy
         env: {CMAKE_POLICY_VERSION_MINIMUM: "3.5"}

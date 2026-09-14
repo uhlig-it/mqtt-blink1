@@ -409,12 +409,18 @@ armv7 build is proven.
 
 > Result (2026-09-14): implemented with the musl.cc `arm-linux-musleabihf`
 > cross toolchain — same pattern as the x86_64/aarch64 musl step (toolchain on
-> `$PATH`, `CC`/`CC_<target>`/linker env vars, armhf UAPI headers symlinked into
-> the toolchain's include dir from `linux-libc-dev-armhf-cross`). The shim file,
-> the gnueabihf toolchain step and the glibc-requirement check are gone; the
-> latter is replaced by a `file`-based "statically linked" assertion. The asset
-> name is unchanged (`mqtt-blink1-linux-armv7.tar.gz`), so the playbook needed
-> only the version bump to `v1.0.3`.
+> `$PATH`, `CC`/`CC_<target>`/linker env vars). musl.cc itself is unreachable
+> from GitHub-hosted runners (connect timeouts), so the workflow extracts the
+> toolchain from the cross-rs container image on ghcr.io instead (GitHub's own
+> registry, digest-pinned; the image embeds the same musl.cc toolchain `cross`
+> uses, and its sysroot already bundles the armhf UAPI headers — the v1.0.3
+> attempt that downloaded from musl.cc failed, hence the re-tag after the fix).
+> The shim file, the gnueabihf toolchain step and the glibc-requirement check
+> are gone; the latter is replaced by a `file`-based "statically linked"
+> assertion. The asset name is unchanged (`mqtt-blink1-linux-armv7.tar.gz`),
+> so the playbook needed only the version bump to `v1.0.3`. The extraction
+> steps were validated end-to-end in a clean ubuntu:24.04 container before
+> pushing (CI simulation: OK).
 
 ---
 
