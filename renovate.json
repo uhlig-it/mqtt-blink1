@@ -4,6 +4,17 @@
   "rebaseWhen": "behind-base-branch",
   "labels": ["dependencies"],
   "minimumReleaseAge": "3 days",
+  "regexManagers": [
+    {
+      "description": "Track the armv7 musl cross toolchain image referenced in release.yml (raw `docker pull` inside the workflow's run: block is not parsed by the built-in docker managers).",
+      "fileMatch": ["^.github/workflows/release\\.yml$"],
+      "matchStrings": [
+        "(?m)^IMAGE=ghcr\\.io/cross-rs/armv7-unknown-linux-musleabihf:(?<currentValue>[\\w.+-]+)(@(?<currentDigest>sha256:[a-f0-9]{64}))?$"
+      ],
+      "depName": "ghcr.io/cross-rs/armv7-unknown-linux-musleabihf",
+      "datasource": "docker"
+    }
+  ],
   "packageRules": [
     {
       "description": "Auto-merge Cargo patch updates (Cargo.toml/Cargo.lock) after required CI checks pass.",

@@ -58,8 +58,9 @@ jobs:
           # ghcr.io instead (GitHub's own registry): the image embeds the same
           # musl.cc arm-linux-musleabihf toolchain that `cross` uses, and its
           # sysroot already bundles the kernel UAPI headers (linux/, asm/, ...)
-          # the vendored libusb needs. Digest-pinned for reproducibility.
-          IMAGE=ghcr.io/cross-rs/armv7-unknown-linux-musleabihf@sha256:b4f481f30ceca34730a5723f717396d762d94f6eddd7e1cf7c7862d1377ff98c
+          # the vendored libusb needs. Tag + digest pinned for reproducibility;
+          # Renovate tracks this line via the regexManager in renovate.json.
+          IMAGE=ghcr.io/cross-rs/armv7-unknown-linux-musleabihf:0.2.5@sha256:b4f481f30ceca34730a5723f717396d762d94f6eddd7e1cf7c7862d1377ff98c
           docker pull "$IMAGE"
           docker create --name armv7-musl-tc "$IMAGE"
           sudo mkdir -p /opt/arm-linux-musleabihf-cross/bin \
