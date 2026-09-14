@@ -1,7 +1,8 @@
 # mqtt-blink1 — Future Improvements Plan
 
 Status: analysis complete; **P0 implemented 2026-09-12** (§2 below), **P1 implemented
-2026-09-12** (commit `5feddc0`), **P2 implemented 2026-09-12** (§4 below), P3 still open. Scope decision (2026-09-12):
+2026-09-12** (commit `5feddc0`), **P2 implemented 2026-09-12** (§4 below), **P3
+implemented 2026-09-12** (§5 below; §5.4 deferred). Scope decision (2026-09-12):
 the broker is on the same host (`localhost:1883`), so **TLS enablement is deferred**
 (§8); the URI-handling fix is kept as a correctness fix (§3.1); the stability
 items were promoted to P0 (§2).
@@ -344,6 +345,25 @@ will end up "off", which is the correct state for HA.
 ---
 
 ## 5. Priority P3 — Deployment & CI
+
+> Status: **implemented 2026-09-12** — items 5.1–5.3 below; §5.4 deliberately
+> left open (see its note). Needed two new role capabilities in
+> `uhlig-it/ansible-role-simple-systemd-service`: `program.binary_checksum`
+> (the archive is downloaded via `get_url` and verified before install) and
+> `systemd.extra_unit_options` (arbitrary extra `[Service]` directives;
+> the role template's `Wants=`/`After=` now also take defaults so a partial
+> `systemd` dict can be passed). The playbook derives the SHA-256 from the
+> `.sha256` file the Release workflow now attaches next to each archive
+> (fetched on the controller with `curl`, then read back via the `file`
+> lookup — ansible's `get_url`/`url` lookup go through Python urllib, which
+> trips over the malformed `~/.netrc` on this controller), so bumping
+> `mqtt_blink1_version` is the only manual deploy step — deploying requires a
+> matching `v*` release (next: `v1.0.2`).
+>
+> - [x] 5.1 Playbook: parameterize version + verify checksum (requires the `v1.0.2` tag/release before it can actually deploy)
+> - [x] 5.2 systemd hardening — via `systemd.extra_unit_options` (role's default is `ProtectSystem=full`; this service opts into `strict` + the full directive list). Credentials: the role already renders `MQTT_URL` into `/etc/mqtt-blink1.conf` (0640 root:`runtime_user`) via `EnvironmentFile=` — no secrets in the unit. Blink1 udev rules now deployed from `files/51-blink1.rules` (closes the README TODO). Caveat: `RestrictAddressFamilies` also blocks `AF_NETLINK`, so libusb loses hotplug events — a replugged Blink1 needs a service restart (already effectively true, §2.3).
+> - [x] 5.3 CI hardening — push restricted to `main` (no more double runs for same-repo PRs), concurrency group with cancel-in-progress, all actions pinned to commit SHAs (comments name the tag; Renovate bumps them), `cargo audit` job added via `rustsec/audit-check` (was pre-commit-only).
+> - [ ] 5.4 (Optional) armv7-musl to delete `isoc23_shim.c` — *deferred*: unproven for this toolchain; the glibc+shim route stays until a CI experiment proves a musl armv7 build (deliberate touch, Pi deployment at stake).
 
 ### 5.1 Playbook: parameterize version + verify checksum
 

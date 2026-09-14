@@ -2,14 +2,64 @@
   hosts: all
   become: true
   gather_facts: true
+  vars:
+    # Version of the binary to deploy; bump together with the next `v*` git
+    # tag in this repo. The SHA-256 is not hardcoded: the .sha256 file that
+    # the Release workflow attaches next to each archive is fetched by a
+    # pre-task and read back on the controller, so bumping this variable is
+    # the only manual step (the release must exist).
+    mqtt_blink1_version: v1.0.2
+    mqtt_blink1_checksum_file: "/tmp/mqtt-blink1-{{ mqtt_blink1_version }}.sha256"
+  pre_tasks:
+    - name: Fetch the release's SHA-256 checksum (controller-side)
+      ansible.builtin.command:
+        cmd: >-
+          curl -fsSL --max-time 60 -o {{ mqtt_blink1_checksum_file }}
+          https://github.com/uhlig-it/mqtt-blink1/releases/download/{{ mqtt_blink1_version }}/mqtt-blink1-linux-armv7.tar.gz.sha256
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      tags: [ checksum ]
   roles:
     - role: uhlig-it.simple_systemd_service
       vars:
         program:
           name: mqtt-blink1
           runtime_user: mqtt-blink1
-          binary: https://github.com/uhlig-it/mqtt-blink1/releases/download/v1.0.1/mqtt-blink1-linux-armv7.tar.gz
+          binary: >-
+            https://github.com/uhlig-it/mqtt-blink1/releases/download/{{ mqtt_blink1_version }}/mqtt-blink1-linux-armv7.tar.gz
+          binary_checksum: >-
+            sha256:{{ (lookup('file', mqtt_blink1_checksum_file) | trim | split(' '))[0] }}
           description: Controls a Blink1 via MQTT
           environment:
             MQTT_URL: "{{ mqtt_url }}"
+        # Stricter than the role's default hardening (ProtectSystem=full):
+        # rendered via extra_unit_options now that `hardening` is off, so the
+        # unit carries no duplicate directives (last-wins would allow it, but
+        # duplicates are hard to audit).
+        systemd:
+          hardening: false
+          extra_unit_options:
+            - NoNewPrivileges=true
+            - ProtectSystem=strict
+            - ProtectHome=yes
+            - PrivateTmp=true
+            - RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
       become: true
+  tasks:
+    - name: Blink1 udev rules are present
+      ansible.builtin.copy:
+        src: files/51-blink1.rules
+        dest: /etc/udev/rules.d/51-blink1.rules
+        mode: "0644"
+      register: blink1_udev_rules
+      tags: [ blink1, udev ]
+    - name: Udev rule database is reloaded
+      ansible.builtin.command: udevadm control --reload-rules
+      when: blink1_udev_rules.changed
+      tags: [ blink1, udev ]
+    - name: Replug the Blink1 device for the rules to apply
+      ansible.builtin.debug:
+        msg: Unplug and replug the Blink1 device
+      when: blink1_udev_rules.changed
+      tags: [ blink1, udev ]

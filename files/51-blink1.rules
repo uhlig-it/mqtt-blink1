@@ -1,0 +1,7 @@
+# Blink1 USB LED: make the hidraw device accessible to every user.
+# From the project's go branch (deployment/roles/mqtt-blink1/files/51-blink1.rules),
+# following https://github.com/todbot/blink1/blob/master/linux/51-blink1.rules
+
+SUBSYSTEM=="input", GROUP="input", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="27b8", ATTRS{idProduct}=="01ed", MODE:="666", GROUP="plugdev"
+KERNEL=="hidraw*", ATTRS{idVendor}=="27b8", ATTRS{idProduct}=="01ed", MODE="0666", GROUP="plugdev"
