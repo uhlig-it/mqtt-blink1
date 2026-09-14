@@ -8,7 +8,7 @@
     # the Release workflow attaches next to each archive is fetched by a
     # pre-task and read back on the controller, so bumping this variable is
     # the only manual step (the release must exist).
-    mqtt_blink1_version: v1.0.2
+    mqtt_blink1_version: v1.0.3
     mqtt_blink1_checksum_file: "/tmp/mqtt-blink1-{{ mqtt_blink1_version }}.sha256"
   pre_tasks:
     - name: Fetch the release's SHA-256 checksum (controller-side)

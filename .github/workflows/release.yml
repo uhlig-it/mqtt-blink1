@@ -12,12 +12,12 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
             asset: mqtt-blink1-linux-arm64.tar.gz
-          # 32-bit armhf for the Raspberry Pi ('shop': armv7l, Raspbian bookworm).
-          # glibc 2.38+ (Ubuntu runners) redirects strtol/sscanf/strtoul to
-          # __isoc23_* (requires GLIBC_2.38), which shop's glibc 2.36 lacks;
-          # isoc23_shim.c provides those entry points so the binary stays
-          # compatible (see the Install ARM cross toolchain step).
-          - target: armv7-unknown-linux-gnueabihf
+          # 32-bit armhf for the Raspberry Pi ('shop': armv7l, bookworm).
+          # Statically linked against musl (improvements.md §5.4): unlike the
+          # previous glibc build (which needed isoc23_shim.c to paper over
+          # glibc-version drift on the runners), this cannot break when the
+          # runner image's glibc changes.
+          - target: armv7-unknown-linux-musleabihf
             os: ubuntu-latest
             asset: mqtt-blink1-linux-armv7.tar.gz
           - target: x86_64-apple-darwin
@@ -32,8 +32,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # dtolnay/rust-toolchain@stable
         with: {targets: "${{ matrix.target }}"}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # Swatinem/rust-cache@v2.9.2
-      - name: Install musl-tools (Linux musl targets)
-        if: contains(matrix.target, 'musl')
+      - name: Install musl-tools (x86_64/aarch64 musl targets)
+        # armv7 has its own cross toolchain below: musl-tools only ships a
+        # host-arch musl-gcc, and `contains('musl')` would also match -musleabihf.
+        if: endsWith(matrix.target, 'unknown-linux-musl')
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools linux-libc-dev
@@ -48,35 +50,38 @@ jobs:
           sudo ln -s /usr/include/linux "$MUSL_INCLUDE/linux"
           sudo ln -s /usr/include/asm-generic "$MUSL_INCLUDE/asm-generic"
           sudo ln -s /usr/include/${ARCH}-linux-gnu/asm "$MUSL_INCLUDE/asm"
-      - name: Install ARM cross toolchain (armv7 gnueabihf target)
-        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+      - name: Install ARMv7 musl cross toolchain (armv7-unknown-linux-musleabihf target)
+        if: matrix.target == 'armv7-unknown-linux-musleabihf'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf
-          # rustc defaults to the host `cc` for cross targets; hand it the ARM
-          # linker. Everything else (compiler, ar) is found by the cc crate / CMake
-          # itself: cc maps armv7-unknown-linux-gnueabihf to an arm-linux-gnueabihf
-          # prefix. Do NOT set PKG_CONFIG_ALLOW_CROSS: the libusb pkg-config probe
-          # must fail so libusb1-sys builds its vendored copy with the cross compiler.
-          # Then compile isoc23_shim.c (replaces the GLIBC_2.38-only __isoc23_* the
-          # glibc headers redirect to) and link it into the final binary.
-          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> "$GITHUB_ENV"
-          arm-linux-gnueabihf-gcc -std=gnu11 -fPIC -c isoc23_shim.c -o /tmp/isoc23_shim.o
-          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUSTFLAGS=-C link-arg=/tmp/isoc23_shim.o" >> "$GITHUB_ENV"
+          sudo apt-get install -y linux-libc-dev-armhf-cross
+          # rustc defaults to the host `cc` for cross targets; hand it the ARMv7
+          # musl linker. CC is what the cc crate and CMake use for the bundled C
+          # dependencies (paho.mqtt.c, libusb). Do NOT set PKG_CONFIG_ALLOW_CROSS:
+          # the libusb pkg-config probe must fail so libusb1-sys builds its
+          # vendored copy with the cross compiler.
+          curl -fsSL --retry 3 -o /tmp/arm-linux-musleabihf-cross.tgz https://musl.cc/arm-linux-musleabihf-cross.tgz
+          sudo tar -xzf /tmp/arm-linux-musleabihf-cross.tgz -C /opt
+          echo "/opt/arm-linux-musleabihf-cross/bin" >> "$GITHUB_PATH"
+          echo "CC=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
+          echo "CC_armv7_unknown_linux_musleabihf=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER=arm-linux-musleabihf-gcc" >> "$GITHUB_ENV"
+          # The musl cross-gcc ships its own libc headers but no kernel headers,
+          # so the vendored libusb cannot find the Linux UAPI headers. Symlink
+          # them in (same idea as the musl-tools step above).
+          MUSL_INCLUDE=/opt/arm-linux-musleabihf-cross/arm-linux-musleabihf/include
+          sudo ln -s /usr/arm-linux-gnueabihf/include/linux "$MUSL_INCLUDE/linux"
+          sudo ln -s /usr/arm-linux-gnueabihf/include/asm "$MUSL_INCLUDE/asm"
+          sudo ln -s /usr/arm-linux-gnueabihf/include/asm-generic "$MUSL_INCLUDE/asm-generic"
       - name: Build
         # cmake >= 4 rejects the bundled paho.mqtt.c's outdated cmake_minimum_required policy
         env: {CMAKE_POLICY_VERSION_MINIMUM: "3.5"}
         run: cargo build --release --target ${{ matrix.target }}
-      - name: Verify glibc requirement (shop runs Debian 12, glibc 2.36)
-        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+      - name: Verify the armv7 binary is statically linked (no glibc coupling)
+        if: matrix.target == 'armv7-unknown-linux-musleabihf'
         run: |
-          HIGHEST=$(objdump -T target/${{ matrix.target }}/release/mqtt-blink1 \
-            | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          echo "Binary requires at most glibc ${HIGHEST#GLIBC_}; target host has 2.36"
-          if [ -n "$HIGHEST" ] && [ "$(printf '%s\n2.36' "${HIGHEST#GLIBC_}" | sort -V | tail -1)" != "2.36" ]; then
-            echo "::error::armv7 binary requires glibc ${HIGHEST#GLIBC_} but shop has 2.36"
-            exit 1
-          fi
+          file target/${{ matrix.target }}/release/mqtt-blink1
+          file target/${{ matrix.target }}/release/mqtt-blink1 | grep -q 'statically linked'
       - name: Compress binary
         run: |
           cd target/${{ matrix.target }}/release

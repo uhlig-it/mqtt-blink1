@@ -2,7 +2,8 @@
 
 Status: analysis complete; **P0 implemented 2026-09-12** (§2 below), **P1 implemented
 2026-09-12** (commit `5feddc0`), **P2 implemented 2026-09-12** (§4 below), **P3
-implemented 2026-09-12** (§5 below; §5.4 deferred). Scope decision (2026-09-12):
+implemented 2026-09-12** (§5 below; §5.4 implemented 2026-09-14, shipped in
+`v1.0.3`). Scope decision (2026-09-12):
 the broker is on the same host (`localhost:1883`), so **TLS enablement is deferred**
 (§8); the URI-handling fix is kept as a correctness fix (§3.1); the stability
 items were promoted to P0 (§2).
@@ -24,12 +25,11 @@ Debian 12 / glibc 2.36) via Ansible + systemd (external role
 |---|---|
 | `src/main.rs` | CLI args (clap), MQTT_URL parsing, connect/subscribe/reconnect loop, command dispatch |
 | `src/blink1.rs` | `Command`/`Color`/`Blink` serde types + deserialization tests |
-| `Cargo.toml` | deps: `blinkrs 2.0.1`, `clap`, `paho-mqtt 0.14` (default-features off, `bundled`), `serde`, `serde_json`, `signal-hook 0.4.0`, `url` |
+| `Cargo.toml` | deps: `blinkrs 2.0.1`, `clap`, `paho-mqtt 0.14` (default-features off, `bundled`), `serde`, `serde_json`, `url` |
 | `.github/workflows/ci.yml` | fmt + clippy, tests (ubuntu/macos) |
-| `.github/workflows/release.yml` | cross-builds 5 targets; armv7 uses glibc + `isoc23_shim.c` |
-| `playbook.yml` | Ansible deploy; hardcodes binary URL `.../v1.0.1/mqtt-blink1-linux-armv7.tar.gz` |
+| `.github/workflows/release.yml` | cross-builds 5 targets; armv7 is statically linked against musl (since `v1.0.3`) |
+| `playbook.yml` | Ansible deploy; `mqtt_blink1_version` + SHA-256 from the release's `.sha256` file |
 | `inventory.yml`, `group_vars/all/secrets.yml` | host + vault-encrypted `mqtt_url` |
-| `isoc23_shim.c` | `__isoc23_*` shims so the armv7 binary runs on glibc 2.36 |
 | `.cargo/config.toml` | `CMAKE_POLICY_VERSION_MINIMUM=3.5` workaround for bundled paho.mqtt.c + CMake ≥ 4 |
 
 ### Baseline checks (all pass at analysis time)
@@ -346,8 +346,8 @@ will end up "off", which is the correct state for HA.
 
 ## 5. Priority P3 — Deployment & CI
 
-> Status: **implemented 2026-09-12** — items 5.1–5.3 below; §5.4 deliberately
-> left open (see its note). Needed two new role capabilities in
+> Status: **implemented 2026-09-12** — items 5.1–5.3 below; §5.4 implemented
+> 2026-09-14 (see its note). Needed two new role capabilities in
 > `uhlig-it/ansible-role-simple-systemd-service`: `program.binary_checksum`
 > (the archive is downloaded via `get_url` and verified before install) and
 > `systemd.extra_unit_options` (arbitrary extra `[Service]` directives;
@@ -363,7 +363,7 @@ will end up "off", which is the correct state for HA.
 > - [x] 5.1 Playbook: parameterize version + verify checksum (requires the `v1.0.2` tag/release before it can actually deploy)
 > - [x] 5.2 systemd hardening — via `systemd.extra_unit_options` (role's default is `ProtectSystem=full`; this service opts into `strict` + the full directive list). Credentials: the role already renders `MQTT_URL` into `/etc/mqtt-blink1.conf` (0640 root:`runtime_user`) via `EnvironmentFile=` — no secrets in the unit. Blink1 udev rules now deployed from `files/51-blink1.rules` (closes the README TODO). Caveat: `RestrictAddressFamilies` also blocks `AF_NETLINK`, so libusb loses hotplug events — a replugged Blink1 needs a service restart (already effectively true, §2.3).
 > - [x] 5.3 CI hardening — push restricted to `main` (no more double runs for same-repo PRs), concurrency group with cancel-in-progress, all actions pinned to commit SHAs (comments name the tag; Renovate bumps them), `cargo audit` job added via `rustsec/audit-check` (was pre-commit-only).
-> - [ ] 5.4 (Optional) armv7-musl to delete `isoc23_shim.c` — *deferred*: unproven for this toolchain; the glibc+shim route stays until a CI experiment proves a musl armv7 build (deliberate touch, Pi deployment at stake).
+> - [x] 5.4 (Optional) armv7-musl to delete `isoc23_shim.c` — *implemented 2026-09-14* (shipped in `v1.0.3`): proven locally first (`cross` + Docker Desktop QEMU: full `armv7-unknown-linux-musleabihf` cross-build incl. the bundled C; binary verified statically linked and executed on armv7 Debian bookworm), then `release.yml` switched to the musl.cc `arm-linux-musleabihf` cross toolchain.
 
 ### 5.1 Playbook: parameterize version + verify checksum
 
@@ -406,6 +406,15 @@ If a musl armv7 cross-toolchain works with the vendored libusb (the amd64/arm64
 musl targets already do), switching would remove the shim and the
 `Verify glibc requirement` step. Deliberate touch — only do this if the musl
 armv7 build is proven.
+
+> Result (2026-09-14): implemented with the musl.cc `arm-linux-musleabihf`
+> cross toolchain — same pattern as the x86_64/aarch64 musl step (toolchain on
+> `$PATH`, `CC`/`CC_<target>`/linker env vars, armhf UAPI headers symlinked into
+> the toolchain's include dir from `linux-libc-dev-armhf-cross`). The shim file,
+> the gnueabihf toolchain step and the glibc-requirement check are gone; the
+> latter is replaced by a `file`-based "statically linked" assertion. The asset
+> name is unchanged (`mqtt-blink1-linux-armv7.tar.gz`), so the playbook needed
+> only the version bump to `v1.0.3`.
 
 ---
 
