@@ -8,7 +8,7 @@
     # the Release workflow attaches next to each archive is fetched by a
     # pre-task and read back on the controller, so bumping this variable is
     # the only manual step (the release must exist).
-    mqtt_blink1_version: v1.0.3
+    mqtt_blink1_version: v1.0.4
     mqtt_blink1_checksum_file: "/tmp/mqtt-blink1-{{ mqtt_blink1_version }}.sha256"
   pre_tasks:
     - name: Fetch the release's SHA-256 checksum (controller-side)
@@ -44,7 +44,9 @@
             - ProtectSystem=strict
             - ProtectHome=yes
             - PrivateTmp=true
-            - RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+            # AF_NETLINK is required: libusb opens a netlink socket for its
+            # udev-based hotplug monitor, and libusb_init() fails without it.
+            - RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
       become: true
   tasks:
     - name: Blink1 udev rules are present

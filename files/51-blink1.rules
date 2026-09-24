@@ -1,7 +1,10 @@
-# Blink1 USB LED: make the hidraw device accessible to every user.
-# From the project's go branch (deployment/roles/mqtt-blink1/files/51-blink1.rules),
-# following https://github.com/todbot/blink1/blob/master/linux/51-blink1.rules
+# Blink1 USB LED: make the device accessible to the service user.
+# Based on https://github.com/todbot/blink1/blob/master/linux/51-blink1.rules,
+# but every rule is scoped to the Blink1's USB IDs. The upstream ruleset's
+# first line is unscoped (`SUBSYSTEM=="input", MODE="0666"`), which would make
+# *every* input device on the host world-writable; scoping it to the Blink1
+# keeps the intent without the broad grant.
 
-SUBSYSTEM=="input", GROUP="input", MODE="0666"
+SUBSYSTEM=="input", ATTRS{idVendor}=="27b8", ATTRS{idProduct}=="01ed", GROUP="input", MODE="0666"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="27b8", ATTRS{idProduct}=="01ed", MODE:="666", GROUP="plugdev"
 KERNEL=="hidraw*", ATTRS{idVendor}=="27b8", ATTRS{idProduct}=="01ed", MODE="0666", GROUP="plugdev"

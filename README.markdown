@@ -60,6 +60,16 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+# Device access
+
+The service runs as the unprivileged `mqtt-blink1` user, so it needs the udev rule in `files/51-blink1.rules` (installed to `/etc/udev/rules.d/51-blink1.rules` by the playbook) to open the Blink1's USB device.
+
+On 2026-09-24 that rule was found missing on `shop`, and the service failed with `Error: DeviceListError(Access)` on the first command after a reboot. udev only (re)applies permissions when a device is enumerated, so the already-created device node kept its permissive mode until the next reboot — the failure surfaced long after the rule disappeared. Redeploying the rule and re-triggering the device fixed it. If the service logs `DeviceListError(Access)`, check that the rule file exists and that the Blink1's `/dev/bus/usb/*/*` node is world-writable.
+
+Since v1.0.4 the service probes the device at startup (a no-op write, which also resets the LED to off) and exits with a clear error if it is unreachable, so a missing rule surfaces immediately instead of on the first command.
+
+The unit's `RestrictAddressFamilies` must include `AF_NETLINK`: libusb opens a netlink socket for its udev-based hotplug monitor and fails to initialise without it, which the service reports as `unable to find device`.
+
 # FAQ
 
 ## Why Rust?

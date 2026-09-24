@@ -58,6 +58,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // `Blinkers::new()` only creates a libusb context; it never touches the
+    // device. Probe it here so that a missing udev rule (or an unplugged
+    // device) fails loudly at startup instead of silently on the first command.
+    if let Err(e) = probe_device(&blink1) {
+        eprintln!("Error: {e}");
+        eprintln!(
+            "Check that /etc/udev/rules.d/51-blink1.rules is installed and that the device node is accessible."
+        );
+        process::exit(1);
+    }
+
     // $MQTT_URL is deliberately read directly — it must not be exposed on the
     // CLI (flag or positional): a URL may carry user:pass credentials.
     let urlstr = env::var("MQTT_URL").unwrap_or_else(|_| {
@@ -224,6 +235,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.stop_consuming();
 
     Ok(())
+}
+
+/// Verifies at startup that the Blink1 is present and accessible.
+///
+/// `Blinkers::new()` only creates a libusb context and never touches the
+/// device, so without this probe a missing udev rule (or an unplugged device)
+/// would go unnoticed until the first command arrives — possibly hours later.
+/// Enumeration alone is not enough: libusb lists devices without opening them,
+/// so it succeeds even without permission to use the device. A no-op write is
+/// what actually exercises access (and resets the LED to off).
+fn probe_device(blink1: &Blinkers) -> Result<(), String> {
+    match blink1.device_count() {
+        Ok(0) => Err("no Blink1 device found".to_string()),
+        Ok(_) => blink1
+            .send(Message::Immediate(blinkrs::Color::Three(0, 0, 0), None))
+            .map(|_| ())
+            .map_err(|e| format!("unable to access the Blink1 device: {e:?}")),
+        Err(e) => Err(format!("unable to enumerate USB devices: {e:?}")),
+    }
 }
 
 /// Reconnects forever with capped exponential backoff (§2.2). On success,
