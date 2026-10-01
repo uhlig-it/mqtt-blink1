@@ -105,7 +105,7 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: Produce SHA-256 checksums (consumed by playbook.yml's binary_checksum)
+      - name: Produce SHA-256 checksums (consumed by playbooks/services/mqtt-blink1.yml's binary_checksum)
         run: |
           cd artifacts
           for f in *.tar.gz; do
@@ -115,3 +115,9 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+  deploy:
+    needs: release
+    uses: uhlig-it/infrastructure/.github/workflows/deploy.yml@main
+    with:
+      service: mqtt-blink1
+    secrets: inherit
