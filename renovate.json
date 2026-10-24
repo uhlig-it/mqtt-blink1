@@ -27,7 +27,8 @@
     {
       "description": "Require human review for potentially breaking dependency updates.",
       "matchUpdateTypes": ["minor", "major"],
-      "automerge": false
+      "automerge": false,
+      "assignees": ["suhlig"]
     }
   ]
 }
