@@ -63,9 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // device) fails loudly at startup instead of silently on the first command.
     if let Err(e) = probe_device(&blink1) {
         eprintln!("Error: {e}");
-        eprintln!(
-            "Check that /etc/udev/rules.d/51-blink1.rules is installed and that the device node is accessible."
-        );
+        eprintln!("{}", device_access_hint());
         process::exit(1);
     }
 
@@ -235,6 +233,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.stop_consuming();
 
     Ok(())
+}
+
+/// Remediation hint for a failed device probe.
+///
+/// The permission model differs per platform: Linux needs the udev rule from the
+/// deployment, macOS has no udev at all and instead requires root so that libusb
+/// may detach the HID kernel driver.
+fn device_access_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macOS has no udev rules: check that the Blink1 is plugged in, and run mqtt-blink1 as root (sudo or a LaunchDaemon) so libusb can detach the HID kernel driver."
+    } else if cfg!(target_os = "linux") {
+        "Check that /etc/udev/rules.d/51-blink1.rules is installed and that the device node is accessible."
+    } else {
+        "Check that this user is allowed to access the Blink1's USB device."
+    }
 }
 
 /// Verifies at startup that the Blink1 is present and accessible.
