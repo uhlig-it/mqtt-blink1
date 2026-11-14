@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Action versions are pinned to commit SHAs (supply-chain hardening); the
-      # comments name the tag they were resolved from, and Renovate bumps them
-      # via digest updates (§5.3).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # dtolnay/rust-toolchain@stable
+      # comments name the tag they were resolved from (tag only, e.g. `# v7`),
+      # and Renovate bumps them via digest updates (§5.3).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with: { components: "rustfmt, clippy" }
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Run clippy
@@ -31,9 +31,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: "${{ matrix.os }}"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # Swatinem/rust-cache@v2.9.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run tests
         # cmake >= 4 rejects the bundled paho.mqtt.c's outdated cmake_minimum_required policy
         env: {CMAKE_POLICY_VERSION_MINIMUM: "3.5"}
@@ -42,7 +42,7 @@ jobs:
     # Advisory check on Cargo.lock; previously only a local pre-commit hook (§5.3)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # rustsec/audit-check@v2.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

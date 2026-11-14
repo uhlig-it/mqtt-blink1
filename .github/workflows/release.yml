@@ -28,10 +28,10 @@ jobs:
             asset: mqtt-blink1-darwin-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with: {targets: "${{ matrix.target }}"}
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install musl-tools (x86_64/aarch64 musl targets)
         # armv7 has its own cross toolchain below: musl-tools only ships a
         # host-arch musl-gcc, and `contains('musl')` would also match -musleabihf.
@@ -59,7 +59,7 @@ jobs:
           # musl.cc arm-linux-musleabihf toolchain that `cross` uses, and its
           # sysroot already bundles the kernel UAPI headers (linux/, asm/, ...)
           # the vendored libusb needs. Tag + digest pinned for reproducibility;
-          # Renovate tracks this line via the regexManager in renovate.json.
+          # Renovate tracks this line via the regex custom manager in renovate.json.
           IMAGE=ghcr.io/cross-rs/armv7-unknown-linux-musleabihf:0.2.5@sha256:b4f481f30ceca34730a5723f717396d762d94f6eddd7e1cf7c7862d1377ff98c
           docker pull "$IMAGE"
           docker create --name armv7-musl-tc "$IMAGE"
@@ -93,7 +93,7 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.asset }} mqtt-blink1
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
@@ -101,7 +101,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
           merge-multiple: true
@@ -111,7 +111,7 @@ jobs:
           for f in *.tar.gz; do
             sha256sum "$f" > "$f.sha256"
           done
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: artifacts/*
           generate_release_notes: true
