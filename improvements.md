@@ -412,7 +412,7 @@ armv7 build is proven.
 > `$PATH`, `CC`/`CC_<target>`/linker env vars). musl.cc itself is unreachable
 > from GitHub-hosted runners (connect timeouts), so the workflow extracts the
 > toolchain from the cross-rs container image on ghcr.io instead (GitHub's own
-> registry, tag+digest pinned and tracked by Renovate via a regexManager in
+> registry, tag+digest pinned and tracked by Renovate via a regex custom manager in
 > renovate.json (tag upgrades when cross-rs releases, digest updates when a
 > tag is rebuilt; the image embeds the same musl.cc toolchain `cross` uses,
 > and its sysroot already bundles the armhf UAPI headers — the v1.0.3
